@@ -1,0 +1,95 @@
+
+D:\zcode2api>setlocal EnableExtensions 
+
+D:\zcode2api>chcp 65001  1>nul 
+
+D:\zcode2api>cd /d "D:\zcode2api\" 
+
+D:\zcode2api>rem ===================================================================== 
+
+D:\zcode2api>rem  zcode-hub Windows launcher -- feature parity with start.sh (Linux) 
+
+D:\zcode2api>rem
+
+D:\zcode2api>rem  Usage: 
+
+D:\zcode2api>rem    start.bat          Start (auto-stops a running instance first) 
+
+D:\zcode2api>rem    start.bat stop     Stop 
+
+D:\zcode2api>rem
+
+D:\zcode2api>rem  Notes: 
+
+D:\zcode2api>rem    - Runs the server hidden in background; logs: serve.log + serve.err.log 
+
+D:\zcode2api>rem    - Health check via GET /meta after start 
+
+D:\zcode2api>rem    - Console messages are ASCII on purpose (avoids codepage mojibake) 
+
+D:\zcode2api>rem ===================================================================== 
+
+D:\zcode2api>rem -- Edit as needed ---------------------------------------------------- 
+
+D:\zcode2api>rem Upstream proxy (Clash mixed port); leave empty "" for direct connection 
+
+D:\zcode2api>set "PROXY=http://127.0.0.1:7890" 
+
+D:\zcode2api>rem ---------------------------------------------------------------------- 
+
+D:\zcode2api>rem Strip ALL_PROXY (on Windows var names are case-insensitive, so this 
+
+D:\zcode2api>rem also covers all_proxy): Clash may inject socks:// there, which httpx 
+
+D:\zcode2api>rem and pip cannot use without PySocks -> every request fails with 500. 
+
+D:\zcode2api>rem Parity with start.sh (commit e3222ef). 
+
+D:\zcode2api>set "ALL_PROXY=" 
+
+D:\zcode2api>set "PORT=3000" 
+
+D:\zcode2api>if exist .env for /F "tokens=1,* delims==" %a in ('findstr /b /c:"ZCODE_PORT=" .env') do set "PORT=%b" 
+
+D:\zcode2api>set "PORT=3000" 
+
+D:\zcode2api>if defined PORT set "PORT=3000" 
+
+D:\zcode2api>if not defined PORT set "PORT=3000" 
+
+D:\zcode2api>rem Pause on exit only when launched by double-click (cmd /c), never in scripts 
+
+D:\zcode2api>set "DBLCLK=0" 
+
+D:\zcode2api>echo C:\Windows\system32\cmd.exe /c D:\zcode2api\_debug_start.bat   | find /i "/c"   1>nul 2>&1  && set "DBLCLK=1" 
+
+D:\zcode2api>if /I "" == "stop" (
+call :stop_instance  
+ echo [OK] Stopped.  
+ if "0" == "1" pause 
+ exit /b 0 
+) 
+
+D:\zcode2api>rem -- 1. venv + Python dependencies ------------------------------------- 
+
+D:\zcode2api>if not exist ".venv\Scripts\python.exe" (
+where python  1>nul 2>&1  
+ if errorlevel 1 (
+echo [!] python not found on PATH. Install Python 3.11+ first.  
+ goto :fail 
+)  
+ echo [*] Creating venv directory .venv ...  
+ python -m venv .venv   || goto :fail 
+) 
+
+D:\zcode2api>".venv\Scripts\python.exe" -c "import fastapi, uvicorn, httpx"  1>nul 2>&1 
+
+D:\zcode2api>if errorlevel 1 (
+echo [*] Installing Python dependencies ...  
+ if defined PROXY (".venv\Scripts\python.exe" -m pip install -q --proxy "http://127.0.0.1:7890" -r requirements.txt   || goto :fail )  else (".venv\Scripts\python.exe" -m pip install -q -r requirements.txt   || goto :fail ) 
+) 
+
+D:\zcode2api>rem -- 2. captcha_node (npm) dependencies -------------------------------- 
+... was unexpected at this time.
+
+D:\zcode2api>    echo [*] Installing captcha_node dependencies (npm install) ...
