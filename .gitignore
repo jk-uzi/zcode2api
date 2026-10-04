@@ -30,5 +30,6 @@ serve.log
 serve.err.log
 serve.pid
 .trae_*
+.sg_*
 .sg-js/
 .sg_login.html
