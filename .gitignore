@@ -33,3 +33,4 @@ serve.pid
 .sg_*
 .sg-js/
 .sg_login.html
+.zcode/
