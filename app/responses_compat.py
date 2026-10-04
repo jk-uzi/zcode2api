@@ -47,8 +47,16 @@ def _image_block(url: str) -> dict | None:
 
 
 def _message_to_blocks(item: dict) -> dict | None:
-    """type=="message" 条目 → Anthropic 消息。assistant 取 output_text，
-    user（及其他角色按 user）取 input_text / input_image（仅 data URL）。"""
+    """message 条目 → Anthropic 消息；无有效内容返回 None（整条丢弃）。
+
+    兼容两种入参形态：
+    - Responses 规范：type="message"，分块用 input_text / output_text
+    - chat 简写（部分客户端的 input 数组就长这样）：无 type，分块用 text——
+      缺 type 的条目若带 role 同样按消息处理，否则会被当未知条目丢弃，
+      最终发出空 messages 招致上游 400（实测 code 1214）。
+    assistant 取 output_text/text，user（及其他角色按 user）取
+    input_text/text 与 input_image（仅 data URL）。
+    """
     role = item.get("role")
     content = item.get("content")
     if role == "assistant":
@@ -57,10 +65,10 @@ def _message_to_blocks(item: dict) -> dict | None:
             blocks.append({"type": "text", "text": content})
         elif isinstance(content, list):
             for part in content:
-                if (isinstance(part, dict) and part.get("type") == "output_text"
+                if (isinstance(part, dict) and part.get("type") in ("output_text", "text")
                         and isinstance(part.get("text"), str) and part["text"]):
                     blocks.append({"type": "text", "text": part["text"]})
-        return {"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]}
+        return {"role": "assistant", "content": blocks} if blocks else None
     # user 及未知角色一律按 user 处理
     blocks = []
     if isinstance(content, str) and content:
@@ -70,7 +78,7 @@ def _message_to_blocks(item: dict) -> dict | None:
             if not isinstance(part, dict):
                 continue
             ptype = part.get("type")
-            if ptype == "input_text" and isinstance(part.get("text"), str) and part["text"]:
+            if ptype in ("input_text", "text") and isinstance(part.get("text"), str) and part["text"]:
                 blocks.append({"type": "text", "text": part["text"]})
             elif ptype == "input_image":
                 url = part.get("image_url")
@@ -79,7 +87,7 @@ def _message_to_blocks(item: dict) -> dict | None:
                 block = _image_block(str(url))
                 if block:
                     blocks.append(block)
-    return {"role": "user", "content": blocks or [{"type": "text", "text": ""}]}
+    return {"role": "user", "content": blocks} if blocks else None
 
 
 def _reasoning_to_thinking(item: dict) -> dict | None:
@@ -179,8 +187,11 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
         if not isinstance(item, dict):
             continue  # 非 dict 条目安静跳过
         itype = item.get("type")
-        if itype == "message":
-            out_msgs.append(_message_to_blocks(item))
+        # type 缺失但带 role 的条目按消息处理（客户端 chat 简写发法）
+        if itype == "message" or (itype is None and item.get("role")):
+            msg = _message_to_blocks(item)
+            if msg is not None:
+                out_msgs.append(msg)
         elif itype == "reasoning":
             msg = _reasoning_to_thinking(item)
             if msg is not None:
@@ -198,6 +209,11 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
             messages[-1]["content"] = messages[-1]["content"] + msg["content"]
         else:
             messages.append(msg)
+    # 全部条目都映射不出内容 → 本地 400 早失败：空 messages 发上游只会换来
+    # 语焉不详的 1214「messages 参数非法」，客户端无法据此定位入参问题
+    if not messages:
+        return None, ("input 未包含可用消息条目（支持 message/reasoning/"
+                      "function_call/function_call_output，message 条目可省略 type 只留 role+content）")
 
     body: dict = {
         "model": model,

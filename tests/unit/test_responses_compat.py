@@ -244,12 +244,59 @@ class TestResponsesToAnthropic:
         assert responses_to_anthropic({"model": "GLM-5.3"})[1] == "必须提供 input"
         assert responses_to_anthropic({"model": "GLM-5.3", "input": []})[1] == "必须提供 input"
 
-    def test_empty_input_with_previous_response_id_allowed(self):
-        # 网关层会把链入条目合并进 input；直接调用时 previous_response_id 放行空 input
+    def test_empty_input_with_previous_response_id_rejected(self):
+        # 网关层命中历史后会把存储条目合并进 input，翻译器见到空 messages 一律早失败：
+        # 空数组发上游只会换来语焉不详的 1214「messages 参数非法」
         body, err = responses_to_anthropic({"model": "GLM-5.3", "input": [],
                                             "previous_response_id": "resp_x"})
+        assert err is not None and body is None
+
+    def test_chat_shorthand_item_without_type(self):
+        # 部分客户端的 input 数组发法：{"role":"user","content":"hi"}（无 type）——
+        # 曾被当未知条目丢弃、发出空 messages 招致上游 400（实测 code 1214）
+        body, err = responses_to_anthropic({
+            "model": "GLM-5.3",
+            "input": [{"role": "user", "content": "hi"},
+                      {"role": "assistant", "content": "yo"}],
+        })
         assert err is None
-        assert body["messages"] == []
+        assert body["messages"] == [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "yo"}]},
+        ]
+
+    def test_chat_shorthand_parts_with_text_type(self):
+        body, err = responses_to_anthropic({
+            "model": "GLM-5.3",
+            "input": [{"role": "user",
+                       "content": [{"type": "text", "text": "hi"}]}],
+        })
+        assert err is None
+        assert body["messages"] == [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        ]
+
+    def test_empty_content_message_dropped(self):
+        # 空内容消息无信息量，整条丢弃而非塞空 text 块（上游对空块同样敏感）
+        body, err = responses_to_anthropic({
+            "model": "GLM-5.3",
+            "input": [{"type": "message", "role": "user", "content": ""},
+                      {"type": "message", "role": "user",
+                       "content": [{"type": "input_text", "text": "hi"}]}],
+        })
+        assert err is None
+        assert body["messages"] == [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        ]
+
+    def test_all_items_unusable_rejected(self):
+        # 条目都映射不出内容 → 本地 400，不把空 messages 发给上游
+        body, err = responses_to_anthropic({
+            "model": "GLM-5.3",
+            "input": [{"type": "message", "role": "user", "content": ""},
+                      {"type": "item_reference", "id": "msg_1"}],
+        })
+        assert err is not None and body is None
 
     def test_non_dict_items_skipped(self):
         body, _ = responses_to_anthropic({
